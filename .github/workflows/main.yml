@@ -3,40 +3,45 @@ name: Build and Push Docker Image to AWS ECR
 on:
   push:
     branches:
-      - main
+      - main  # You can specify the branch you want to trigger this workflow on
 
 jobs:
-  build-and-push:
+  build_and_push:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v2
 
       - name: Login to AWS ECR
         id: login-ecr
         run: |
-          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          echo ${{ secrets.AWS_ACCESS_KEY_ID }} | aws configure set aws_access_key_id --profile default
+          echo ${{ secrets.AWS_SECRET_ACCESS_KEY }} | aws configure set aws_secret_access_key --profile default
           aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-        env:
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
-      - name: Build Docker image
+      - name: Build Docker Image
+        id: build
         run: |
-          docker build -t my-docker-image:latest .
-        working-directory: ./
+          docker build -t manu-ecr:latest .
+          docker tag manu-ecr:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/manu-ecr:latest
 
-      - name: Tag Docker image
+      - name: Push Docker Image to AWS ECR
+        id: push
         run: |
-          docker tag my-docker-image:latest ${{ steps.login-ecr.outputs.server_url }}/manu-ecr:latest
-        working-directory: ./
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/manu-ecr:latest
 
-      - name: Push Docker image to ECR
+      - name: Set GitHub Environment Variable with ECR Repository URL
+        id: set-env
         run: |
-          docker push ${{ steps.login-ecr.outputs.server_url }}/manu-ecr:latest
-        working-directory: ./
+          echo "DOCKER_IMAGE_URL=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/manu-ecr:latest" >> $GITHUB_ENV
 
-      - name: Complete
-        run: echo "Docker image built and pushed to ECR repository 'manu-ecr' successfully."
+      - name: Display ECR Repository URL
+        run: |
+          echo "ECR Repository URL: $DOCKER_IMAGE_URL"
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: us-east-1  # Replace with your desired AWS region
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
