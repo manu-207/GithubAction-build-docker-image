@@ -1,79 +1,42 @@
-name: building docker image for dev
+name: Build and Push Docker Image to AWS ECR
 
 on:
-  workflow_dispatch:
-
-
+  push:
+    branches:
+      - main
 
 jobs:
-  validate-ecr-repo:
+  build-and-push:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-        with:
-          ref: develop
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.EKS_ACCESS_KEYID }}
-          aws-secret-access-key: ${{ secrets.EKS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+      - name: Login to AWS ECR
+        id: login-ecr
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
-      - name: Check if ECR repository exists
-        id: ecr-check
+      - name: Build Docker image
         run: |
-          REPO_NAME=cco-api-dev
-          aws ecr describe-repositories --repository-names $REPO_NAME || echo "::set-output name=repo-exists::false"
-          echo "::set-output name=repo-name::$REPO_NAME"
-      - name: Create ECR repository if it does not exist
-        id: ecr-create
-        if: steps.ecr-check.outputs.repo-exists != 'true'
-        run: |
-          REPO_NAME=cco-api-dev
-          aws ecr create-repository --repository-name $REPO_NAME || echo "::error ::Failed to create ECR repository"
-          echo "::set-output name=repo-name::$REPO_NAME"
-      - name: Output ECR repository name
-        run: |
-          echo "ECR Repository Name: ${{ steps.ecr-create.outputs.repo-name }}"
-          
-      - name: Get ECR Repository URL
-        id: ecr-repo-url
-        run: |
-          REPO_NAME=cco-api-dev
-          REPO_URI=$(aws ecr describe-repositories --repository-names $REPO_NAME --query "repositories[0].repositoryUri" --output text)
-          echo "::set-output name=repo-url::$REPO_URI"
-      
-      - name: Login to Amazon ECR
-        id: ecr-login
-        run: |
-          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ steps.ecr-repo-url.outputs.repo-url }}
-          
-      - name: Get the latest image tag
-        id: get-latest-tag
-        run: |
-          REPO_NAME=cco-api-dev
-          latest_tag=$(aws ecr describe-images --repository-name $REPO_NAME --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags' --output text)
-          echo "::set-output name=tag::$latest_tag"
+          docker build -t my-docker-image:latest .
+        working-directory: ./
 
-      - name: Increment image tag
-        id: increment-tag
+      - name: Tag Docker image
         run: |
-          latest_tag=${{ steps.get-latest-tag.outputs.tag }}
-          tag_number=${latest_tag#v}
-          next_tag_number=$((tag_number + 1))
-          next_tag=v$next_tag_number
-          echo "::set-output name=tag::$next_tag"
-        
-          
-      - name: Build and tag Docker image
-        run: |
-          next_tag=${{ steps.increment-tag.outputs.tag }}
-          docker build -t ${{ steps.ecr-create.outputs.repo-name }} .
-          docker tag ${{ steps.ecr-create.outputs.repo-name }}:latest ${{ steps.ecr-repo-url.outputs.repo-url }}:$next_tag
+          docker tag my-docker-image:latest ${{ steps.login-ecr.outputs.server_url }}/manu-ecr:latest
+        working-directory: ./
+
       - name: Push Docker image to ECR
         run: |
-          next_tag=${{ steps.increment-tag.outputs.tag }}
-          docker push ${{ steps.ecr-repo-url.outputs.repo-url }}:$next_tag
+          docker push ${{ steps.login-ecr.outputs.server_url }}/manu-ecr:latest
+        working-directory: ./
+
+      - name: Complete
+        run: echo "Docker image built and pushed to ECR repository 'manu-ecr' successfully."
