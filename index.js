@@ -1,15 +1,23 @@
-var express = require('express');
-var app = express();
+const express = require('express')
+const app = express()
+const port = process.env.PORT || 3000;
+const config = require('config')
 
-app.get('/', function (req, res) {
-    res.send('{ "response": "Hello From Thetips4you" }');
-});
+app.get('/', (req, res)=>{
+    res.send('CI/CD App, Works well !')
+})
 
-app.get('/will', function (req, res) {
-    res.send('{ "response": "Hello World" }');
-});
-app.get('/ready', function (req, res) {
-    res.send('{ "response": " Great!, It works!" }');
-});
-app.listen(process.env.PORT || 3000);
-module.exports = app;
+app.get('/status', (req, res)=>{
+    res.status(200)
+    res.send('Okay')
+})
+
+app.get('/hello',(req, res)=>{
+    res.status(200)
+    res.send('Hi, there!')
+
+})
+
+app.listen(port, ()=>{
+    console.log(`Example app listening on http://localhost:${port}`);
+})
