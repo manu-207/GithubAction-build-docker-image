@@ -1,0 +1,79 @@
+name: building docker image for dev
+
+on:
+  workflow_dispatch:
+
+
+
+jobs:
+  validate-ecr-repo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          ref: develop
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.EKS_ACCESS_KEYID }}
+          aws-secret-access-key: ${{ secrets.EKS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Check if ECR repository exists
+        id: ecr-check
+        run: |
+          REPO_NAME=cco-api-dev
+          aws ecr describe-repositories --repository-names $REPO_NAME || echo "::set-output name=repo-exists::false"
+          echo "::set-output name=repo-name::$REPO_NAME"
+      - name: Create ECR repository if it does not exist
+        id: ecr-create
+        if: steps.ecr-check.outputs.repo-exists != 'true'
+        run: |
+          REPO_NAME=cco-api-dev
+          aws ecr create-repository --repository-name $REPO_NAME || echo "::error ::Failed to create ECR repository"
+          echo "::set-output name=repo-name::$REPO_NAME"
+      - name: Output ECR repository name
+        run: |
+          echo "ECR Repository Name: ${{ steps.ecr-create.outputs.repo-name }}"
+          
+      - name: Get ECR Repository URL
+        id: ecr-repo-url
+        run: |
+          REPO_NAME=cco-api-dev
+          REPO_URI=$(aws ecr describe-repositories --repository-names $REPO_NAME --query "repositories[0].repositoryUri" --output text)
+          echo "::set-output name=repo-url::$REPO_URI"
+      
+      - name: Login to Amazon ECR
+        id: ecr-login
+        run: |
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ steps.ecr-repo-url.outputs.repo-url }}
+          
+      - name: Get the latest image tag
+        id: get-latest-tag
+        run: |
+          REPO_NAME=cco-api-dev
+          latest_tag=$(aws ecr describe-images --repository-name $REPO_NAME --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags' --output text)
+          echo "::set-output name=tag::$latest_tag"
+
+      - name: Increment image tag
+        id: increment-tag
+        run: |
+          latest_tag=${{ steps.get-latest-tag.outputs.tag }}
+          tag_number=${latest_tag#v}
+          next_tag_number=$((tag_number + 1))
+          next_tag=v$next_tag_number
+          echo "::set-output name=tag::$next_tag"
+        
+          
+      - name: Build and tag Docker image
+        run: |
+          next_tag=${{ steps.increment-tag.outputs.tag }}
+          docker build -t ${{ steps.ecr-create.outputs.repo-name }} .
+          docker tag ${{ steps.ecr-create.outputs.repo-name }}:latest ${{ steps.ecr-repo-url.outputs.repo-url }}:$next_tag
+      - name: Push Docker image to ECR
+        run: |
+          next_tag=${{ steps.increment-tag.outputs.tag }}
+          docker push ${{ steps.ecr-repo-url.outputs.repo-url }}:$next_tag
